@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ColorSee — Realtime Color Detection</title>
+    <meta name="description" content="ColorSee names the colors your camera sees, in real time.">
+    <meta name="theme-color" content="#0f0f0f">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <style>
+        :root {
+            --bg: #0f0f0f;
+            --surface: rgba(30, 30, 30, 0.92);
+            --accent: #00ff9d;
+            --text-main: #ffffff;
+            --text-dim: #c8c8c8;
+            --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            --glass: blur(14px) saturate(180%);
+            --danger: #ff4757;
+        }
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        body, html {
+            margin: 0; padding: 0;
+            width: 100%; height: 100%;
+            background-color: var(--bg);
+            font-family: var(--font-stack);
+            overflow: hidden;
+            color: var(--text-main);
+            overscroll-behavior: none;
+        }
+
+        #app-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #000;
+        }
+
+        #source-video, #source-image {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            object-fit: cover;
+            display: none;
+            z-index: 1;
+        }
+
+        #output-canvas {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        .ui-layer {
+            position: absolute;
+            inset: 0;
+            z-index: 10;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        header {
+            padding: 16px 18px;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.85), transparent);
+            text-align: center;
+            pointer-events: auto;
+        }
+        h1 {
+            margin: 0;
+            font-size: 1.45rem;
+            letter-spacing: 2.5px;
+            text-transform: uppercase;
+            font-weight: 800;
+        }
+        h1 span { color: var(--accent); }
+
+        .controls {
+            padding: 14px 14px 18px;
+            background: var(--surface);
+            backdrop-filter: var(--glass);
+            -webkit-backdrop-filter: var(--glass);
+            border-top-left-radius: 22px;
+            border-top-right-radius: 22px;
+            pointer-events: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            box-shadow: 0 -10px 40px rgba(0,0,0,0.7);
+            padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+        }
+
+        .control-row {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        button, .file-upload-label, .btn-link {
+            background: rgba(255,255,255,0.10);
+            border: 1px solid rgba(255,255,255,0.10);
+            color: white;
+            padding: 11px 14px;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.15s ease, background 0.15s ease;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            flex: 1;
+            text-align: center;
+            user-select: none;
+            text-decoration: none;
+            -webkit-appearance: none;
+            appearance: none;
+            line-height: 1.2;
+            font-family: inherit;
+        }
+        button:active, .file-upload-label:active, .btn-link:active {
+            transform: scale(0.96);
+            background: rgba(255,255,255,0.20);
+        }
+        button.primary {
+            background: var(--accent);
+            color: #000;
+            border: none;
+            box-shadow: 0 4px 18px rgba(0, 255, 157, 0.32);
+            font-size: 0.98rem;
+            padding: 13px;
+        }
+
+        .toggle-row {
+            display: flex;
+            gap: 10px;
+            align-items: stretch;
+        }
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            background: rgba(0,0,0,0.32);
+            padding: 8px 14px;
+            border-radius: 12px;
+            font-size: 0.88rem;
+            flex: 1;
+        }
+        .toggle-container .label-text { color: var(--text-dim); font-weight: 500; }
+
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute; cursor: pointer;
+            inset: 0;
+            background-color: #444;
+            transition: .25s;
+            border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute; content: "";
+            height: 18px; width: 18px;
+            left: 3px; bottom: 3px;
+            background-color: white;
+            transition: .25s;
+            border-radius: 50%;
+        }
+        input:checked + .slider { background-color: var(--accent); }
+        input:checked + .slider:before { transform: translateX(20px); }
+
+        .density-buttons {
+            display: flex;
+            gap: 4px;
+            background: rgba(0,0,0,0.32);
+            padding: 4px;
+            border-radius: 12px;
+        }
+        .density-buttons button {
+            flex: 1;
+            padding: 6px 10px;
+            font-size: 0.78rem;
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            color: var(--text-dim);
+            font-weight: 600;
+        }
+        .density-buttons button.active {
+            background: rgba(255,255,255,0.14);
+            color: white;
+        }
+
+        .support-area {
+            margin-top: 4px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        .cash-app { background: #00D632 !important; color: white !important; border: none; }
+        .share-btn { background: #2D9CDB !important; color: white !important; border: none; }
+
+        input[type="file"] { display: none; }
+        .hidden { display: none !important; }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.95); z-index: 100;
+            display: flex; justify-content: center; align-items: center;
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            padding: 20px;
+            opacity: 1;
+            transition: opacity 0.2s ease;
+        }
+        .modal-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+            display: none;
+        }
+        .modal-card {
+            background: #1a1a1a;
+            padding: 32px 26px;
+            border-radius: 22px;
+            text-align: center;
+            max-width: 360px;
+            width: 100%;
+            border: 1px solid #2a2a2a;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+        }
+        .modal-card h2 {
+            margin: 0 0 10px;
+            font-size: 1.6rem;
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+        }
+        .modal-card h2 span { color: var(--accent); }
+        .modal-card p {
+            margin: 0 0 22px;
+            color: var(--text-dim);
+            font-size: 0.92rem;
+            line-height: 1.55;
+        }
+        .modal-card button { width: 100%; }
+
+        /* Toasts */
+        .toast-container {
+            position: fixed;
+            top: max(20px, env(safe-area-inset-top, 0px));
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 200;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+            width: 90%;
+            max-width: 350px;
+        }
+        .toast {
+            background: rgba(30, 30, 30, 0.96);
+            color: #fff;
+            padding: 11px 16px;
+            border-radius: 12px;
+            border-left: 4px solid var(--accent);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            font-size: 0.9rem;
+            opacity: 0;
+            transform: translateY(-16px);
+            transition: opacity 0.25s ease, transform 0.25s ease;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+        .toast.visible { opacity: 1; transform: translateY(0); }
+        .toast.error { border-left-color: var(--danger); }
+    </style>
+</head>
+<body>
+
+    <div id="app-container">
+        <video id="source-video" autoplay playsinline muted></video>
+        <img id="source-image" alt="Uploaded source">
+        <canvas id="output-canvas"></canvas>
+
+        <div class="ui-layer">
+            <header>
+                <h1>Color<span>See</span></h1>
+            </header>
+
+            <div class="controls">
+                <div class="toggle-row">
+                    <div class="toggle-container">
+                        <span class="label-text">Show Labels</span>
+                        <label class="switch">
+                            <input type="checkbox" id="toggle-overlay" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="density-buttons" role="group" aria-label="Label density">
+                        <button data-density="low" type="button">Low</button>
+                        <button data-density="med" type="button" class="active">Med</button>
+                        <button data-density="high" type="button">High</button>
+                    </div>
+                </div>
+
+                <div class="control-row">
+                    <button id="btn-camera" class="primary" type="button">
+                        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                        Live Cam
+                    </button>
+                    <label class="file-upload-label">
+                        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        Upload
+                        <input type="file" id="inp-file" accept="image/*">
+                    </label>
+                </div>
+
+                <div class="support-area">
+                    <a href="https://cash.app/$unixarcade" target="_blank" rel="noopener" class="btn-link cash-app">
+                        Support $unixarcade
+                    </a>
+                    <button class="share-btn" id="btn-share" type="button">
+                        Share App
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="start-modal" class="modal-overlay">
+        <div class="modal-card">
+            <h2>Color<span>See</span></h2>
+            <p>Real-time color identification.<br>Tap Start to enable your camera.</p>
+            <button class="primary" id="btn-start-experience" type="button">Start Experience</button>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+    <script>
+    (function() {
+        'use strict';
+
+        // ---------- Config ----------
+        const CONFIG = {
+            densityPx: { low: 130, med: 90, high: 64 }, // CSS px between samples
+            updateIntervalMs: 60,                       // ~16 FPS camera
+            tempSmoothNew: 0.42,                        // weight of new sample
+            font: '700 12px -apple-system, "Segoe UI", Roboto, sans-serif',
+        };
+
+        // ---------- Curated Palette ----------
+        // Hand-picked, well-spaced named colors. Each entry gets its CIE Lab
+        // coordinates precomputed once so per-frame matching is just a
+        // squared-Lab-distance argmin over ~50 short vectors.
+        const PALETTE_RAW = [
+            // Achromatic
+            ["Black",        0,   0,   0],
+            ["Dark Gray",   64,  64,  64],
+            ["Gray",       128, 128, 128],
+            ["Silver",     192, 192, 192],
+            ["White",      255, 255, 255],
+            // Reds & Pinks
+            ["Maroon",     128,   0,   0],
+            ["Dark Red",   139,   0,   0],
+            ["Red",        230,  20,  20],
+            ["Crimson",    220,  20,  60],
+            ["Tomato",     255,  99,  71],
+            ["Salmon",     250, 128, 114],
+            ["Pink",       255, 192, 203],
+            ["Hot Pink",   255, 105, 180],
+            // Oranges & Browns
+            ["Orange",     255, 140,   0],
+            ["Coral",      255, 127,  80],
+            ["Peach",      255, 200, 160],
+            ["Brown",      120,  60,  30],
+            ["Chocolate",  210, 105,  30],
+            ["Sienna",     160,  82,  45],
+            ["Tan",        210, 180, 140],
+            // Yellows
+            ["Gold",       255, 215,   0],
+            ["Yellow",     245, 230,   0],
+            ["Mustard",    220, 180,  40],
+            ["Khaki",      240, 230, 140],
+            ["Beige",      245, 235, 210],
+            // Greens
+            ["Olive",      128, 128,   0],
+            ["Yellow Green", 154, 205, 50],
+            ["Lime",         0, 230,   0],
+            ["Lime Green",  50, 205,  50],
+            ["Green",        0, 150,  20],
+            ["Forest Green", 34, 120,  40],
+            ["Dark Green",   0,  90,  20],
+            ["Sea Green",   46, 139,  87],
+            ["Mint",       150, 230, 180],
+            // Cyans & Teals
+            ["Teal",         0, 128, 128],
+            ["Cyan",         0, 230, 230],
+            ["Turquoise",   64, 200, 200],
+            // Blues
+            ["Navy",         0,   0, 110],
+            ["Dark Blue",   20,  30, 160],
+            ["Blue",        30,  60, 230],
+            ["Royal Blue",  65, 105, 225],
+            ["Steel Blue",  70, 130, 180],
+            ["Sky Blue",   100, 180, 230],
+            ["Light Blue", 180, 215, 235],
+            // Purples
+            ["Indigo",      75,   0, 130],
+            ["Purple",     128,   0, 128],
+            ["Magenta",    220,  30, 220],
+            ["Violet",     200, 110, 220],
+            ["Plum",       200, 160, 200],
+            ["Lavender",   220, 220, 245],
+        ];
+
+        // sRGB -> linear
+        function srgbToLinear(c) {
+            c = c / 255;
+            return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+        }
+        // Linear sRGB -> XYZ (D65) -> Lab. Standard formulas; Bradford-adapted
+        // primaries unnecessary at this precision level.
+        function rgbToLab(r, g, b) {
+            const lr = srgbToLinear(r);
+            const lg = srgbToLinear(g);
+            const lb = srgbToLinear(b);
+            let x = (lr * 0.4124564 + lg * 0.3575761 + lb * 0.1804375) / 0.95047;
+            let y = (lr * 0.2126729 + lg * 0.7151522 + lb * 0.0721750) / 1.00000;
+            let z = (lr * 0.0193339 + lg * 0.1191920 + lb * 0.9503041) / 1.08883;
+            const f = (t) => t > 0.008856 ? Math.cbrt(t) : (7.787 * t + 16/116);
+            const fx = f(x), fy = f(y), fz = f(z);
+            return {
+                L: 116 * fy - 16,
+                a: 500 * (fx - fy),
+                b: 200 * (fy - fz),
+            };
+        }
+
+        // Precompute Lab for the palette
+        const PALETTE = PALETTE_RAW.map(([name, r, g, b]) => {
+            const lab = rgbToLab(r, g, b);
+            return { name, r, g, b, L: lab.L, A: lab.a, B: lab.b };
+        });
+
+        // ---------- State ----------
+        const STATE = {
+            mode: 'idle',           // 'idle' | 'camera' | 'image'
+            overlayEnabled: true,
+            density: 'med',
+            lastFrameTime: 0,
+            stream: null,
+            cssW: 0, cssH: 0,
+            cols: 0, rows: 0,
+            cellSize: 0,
+            smoothed: null,         // Float32Array(cols*rows*3) of smoothed RGB
+            smoothedInit: false,
+            rafId: 0,
+            sampleCanvas: null,
+            sampleCtx: null,
+        };
+
+        const elApp = document.getElementById('app-container');
+        const elVideo = document.getElementById('source-video');
+        const elImg = document.getElementById('source-image');
+        const elCanvas = document.getElementById('output-canvas');
+        const ctx = elCanvas.getContext('2d', { alpha: true, desynchronized: true });
+        const elToggle = document.getElementById('toggle-overlay');
+        const toastContainer = document.getElementById('toast-container');
+
+        STATE.sampleCanvas = document.createElement('canvas');
+        STATE.sampleCtx = STATE.sampleCanvas.getContext('2d', { willReadFrequently: true });
+
+        // ---------- Utils ----------
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            toastContainer.appendChild(toast);
+            void toast.offsetWidth;
+            requestAnimationFrame(() => toast.classList.add('visible'));
+            setTimeout(() => {
+                toast.classList.remove('visible');
+                setTimeout(() => toast.remove(), 350);
+            }, 3000);
+        }
+
+        // Nearest palette color in CIE Lab space (perceptually uniform —
+        // accounts for the human eye's nonuniform sensitivity across channels,
+        // unlike naive RGB Euclidean distance).
+        function nearestColorName(r, g, b) {
+            const lab = rgbToLab(r, g, b);
+            let minD = Infinity;
+            let bestName = "Unknown";
+            for (let i = 0; i < PALETTE.length; i++) {
+                const p = PALETTE[i];
+                const dL = lab.L - p.L;
+                const dA = lab.a - p.A;
+                const dB = lab.b - p.B;
+                const d = dL*dL + dA*dA + dB*dB;
+                if (d < minD) {
+                    minD = d;
+                    bestName = p.name;
+                }
+            }
+            return bestName;
+        }
+
+        // Relative luminance per WCAG, normalized 0–1.
+        function relLuminance(r, g, b) {
+            const lr = srgbToLinear(r);
+            const lg = srgbToLinear(g);
+            const lb = srgbToLinear(b);
+            return 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
+        }
+
+        // ---------- Canvas sizing ----------
+        // Match canvas internal resolution to (CSS size × DPR) so labels render
+        // at native pixel sharpness while being laid out in CSS units. This
+        // fixes the original bug where labels were drawn at video resolution
+        // and then CSS-downscaled to near-invisibility on phones.
+        function syncCanvasSize() {
+            const cssW = elApp.clientWidth;
+            const cssH = elApp.clientHeight;
+            const dpr = Math.min(window.devicePixelRatio || 1, 2.5); // cap for perf
+
+            const needW = Math.round(cssW * dpr);
+            const needH = Math.round(cssH * dpr);
+
+            const cell = CONFIG.densityPx[STATE.density];
+            const cols = Math.max(2, Math.ceil(cssW / cell));
+            const rows = Math.max(2, Math.ceil(cssH / cell));
+
+            const dimsChanged = elCanvas.width !== needW || elCanvas.height !== needH;
+            const gridChanged = cols !== STATE.cols || rows !== STATE.rows;
+
+            if (dimsChanged) {
+                elCanvas.width = needW;
+                elCanvas.height = needH;
+            }
+            if (dimsChanged || gridChanged) {
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                STATE.cssW = cssW;
+                STATE.cssH = cssH;
+                STATE.cols = cols;
+                STATE.rows = rows;
+                STATE.cellSize = cell;
+                STATE.sampleCanvas.width = cols;
+                STATE.sampleCanvas.height = rows;
+                STATE.smoothed = new Float32Array(cols * rows * 3);
+                STATE.smoothedInit = false;
+            }
+        }
+
+        // ---------- Sampling ----------
+        // For each grid cell, get the average color of the corresponding
+        // region in the source. We mirror the CSS `object-fit: cover` crop so
+        // samples align with what the user actually sees, then let the
+        // browser downsample (with built-in averaging) to a tiny offscreen
+        // canvas — one pixel per grid cell. Much faster than getImageData()
+        // on a full 1080p frame, and gives us free spatial averaging that
+        // single-pixel sampling lacked.
+        function sampleSource(sourceEl, srcW, srcH) {
+            const cols = STATE.cols;
+            const rows = STATE.rows;
+            if (!srcW || !srcH || cols === 0 || rows === 0) return null;
+
+            // object-fit: cover math
+            const scale = Math.max(STATE.cssW / srcW, STATE.cssH / srcH);
+            const visibleW = STATE.cssW / scale;
+            const visibleH = STATE.cssH / scale;
+            const sx = (srcW - visibleW) / 2;
+            const sy = (srcH - visibleH) / 2;
+
+            STATE.sampleCtx.drawImage(
+                sourceEl,
+                sx, sy, visibleW, visibleH,
+                0, 0, cols, rows
+            );
+            return STATE.sampleCtx.getImageData(0, 0, cols, rows).data;
+        }
+
+        // ---------- Rendering ----------
+        function drawLabel(cx, cy, r, g, b, name) {
+            // Pill is filled with the detected color. Text contrast picked
+            // from WCAG luminance so light colors get black text, dark colors
+            // get white. This makes the swatch itself the primary signal —
+            // you see the color before you read its name.
+            ctx.font = CONFIG.font;
+            const padX = 9, padY = 5;
+            const metrics = ctx.measureText(name);
+            const textW = metrics.width;
+            const pillH = 22;
+            const pillW = Math.ceil(textW + padX * 2);
+            const x = Math.round(cx - pillW / 2);
+            const y = Math.round(cy - pillH / 2);
+            const radius = pillH / 2;
+
+            // Subtle dark "halo" behind pill — keeps it readable against
+            // matching-color backgrounds (e.g. a red pill on a red wall).
+            ctx.shadowColor = 'rgba(0,0,0,0.55)';
+            ctx.shadowBlur = 6;
+            ctx.shadowOffsetY = 1;
+
+            // Pill body
+            ctx.fillStyle = `rgb(${r|0},${g|0},${b|0})`;
+            roundRect(ctx, x, y, pillW, pillH, radius);
+            ctx.fill();
+
+            // Stroke for separation from background
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetY = 0;
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+            roundRect(ctx, x + 0.5, y + 0.5, pillW - 1, pillH - 1, radius - 0.5);
+            ctx.stroke();
+
+            // Text
+            const lum = relLuminance(r, g, b);
+            ctx.fillStyle = lum > 0.45 ? '#000' : '#fff';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(name, cx, cy + 0.5);
+        }
+
+        function roundRect(c, x, y, w, h, r) {
+            if (typeof c.roundRect === 'function') {
+                c.beginPath();
+                c.roundRect(x, y, w, h, r);
+                return;
+            }
+            c.beginPath();
+            c.moveTo(x + r, y);
+            c.arcTo(x + w, y, x + w, y + h, r);
+            c.arcTo(x + w, y + h, x, y + h, r);
+            c.arcTo(x, y + h, x, y, r);
+            c.arcTo(x, y, x + w, y, r);
+            c.closePath();
+        }
+
+        function drawOverlay(sourceEl, srcW, srcH, isVideo) {
+            syncCanvasSize();
+            ctx.clearRect(0, 0, STATE.cssW, STATE.cssH);
+
+            if (!STATE.overlayEnabled) return;
+            if (!srcW || !srcH) return;
+
+            const data = sampleSource(sourceEl, srcW, srcH);
+            if (!data) return;
+
+            const cols = STATE.cols;
+            const rows = STATE.rows;
+            const cell = STATE.cellSize;
+            const smoothed = STATE.smoothed;
+            const alpha = isVideo ? CONFIG.tempSmoothNew : 1.0;
+            const init = !STATE.smoothedInit;
+
+            for (let row = 0; row < rows; row++) {
+                for (let col = 0; col < cols; col++) {
+                    const i = (row * cols + col) * 4;
+                    const sIdx = (row * cols + col) * 3;
+                    let r = data[i];
+                    let g = data[i + 1];
+                    let b = data[i + 2];
+
+                    if (isVideo) {
+                        // EMA on linear-ish RGB. Temporal smoothing kills the
+                        // single-frame flicker between neighboring palette
+                        // entries that single-pixel sampling produced.
+                        if (init) {
+                            smoothed[sIdx]     = r;
+                            smoothed[sIdx + 1] = g;
+                            smoothed[sIdx + 2] = b;
+                        } else {
+                            smoothed[sIdx]     = smoothed[sIdx]     * (1 - alpha) + r * alpha;
+                            smoothed[sIdx + 1] = smoothed[sIdx + 1] * (1 - alpha) + g * alpha;
+                            smoothed[sIdx + 2] = smoothed[sIdx + 2] * (1 - alpha) + b * alpha;
+                        }
+                        r = smoothed[sIdx];
+                        g = smoothed[sIdx + 1];
+                        b = smoothed[sIdx + 2];
+                    }
+
+                    const cx = (col + 0.5) * cell;
+                    const cy = (row + 0.5) * cell;
+                    if (cx > STATE.cssW + 4 || cy > STATE.cssH + 4) continue;
+
+                    const name = nearestColorName(r, g, b);
+                    drawLabel(cx, cy, r, g, b, name);
+                }
+            }
+            if (isVideo) STATE.smoothedInit = true;
+        }
+
+        // ---------- Loop ----------
+        function loop(timestamp) {
+            if (STATE.mode !== 'camera') return;
+            if (timestamp - STATE.lastFrameTime >= CONFIG.updateIntervalMs) {
+                if (elVideo.readyState >= 2) {
+                    drawOverlay(elVideo, elVideo.videoWidth, elVideo.videoHeight, true);
+                }
+                STATE.lastFrameTime = timestamp;
+            }
+            STATE.rafId = requestAnimationFrame(loop);
+        }
+
+        // ---------- Camera ----------
+        async function startCamera() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                showToast("Camera not supported. Use Upload.", "error");
+                return;
+            }
+            if (STATE.stream) {
+                STATE.stream.getTracks().forEach(t => t.stop());
+                STATE.stream = null;
+            }
+            cancelAnimationFrame(STATE.rafId);
+            STATE.mode = 'camera';
+            STATE.smoothedInit = false;
+            elImg.style.display = 'none';
+            elVideo.style.display = 'block';
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: { ideal: "environment" },
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                    },
+                    audio: false,
+                });
+                STATE.stream = stream;
+                elVideo.srcObject = stream;
+                await elVideo.play().catch(() => {});
+
+                if (elVideo.readyState < 2) {
+                    await new Promise((resolve) => {
+                        elVideo.onloadedmetadata = () => resolve();
+                    });
+                }
+                STATE.rafId = requestAnimationFrame(loop);
+                showToast("Camera active");
+            } catch (err) {
+                console.error(err);
+                let msg = "Camera denied. Use Upload.";
+                if (err && err.name === 'NotAllowedError') msg = "Camera permission denied.";
+                else if (err && err.name === 'NotFoundError') msg = "No camera found.";
+                else if (location.protocol === 'file:') msg = "Camera needs HTTPS. Use the GitHub Pages link.";
+                showToast(msg, "error");
+            }
+        }
+
+        // ---------- Image ----------
+        function loadImageFile(file) {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                STATE.mode = 'image';
+                if (STATE.stream) {
+                    STATE.stream.getTracks().forEach(t => t.stop());
+                    STATE.stream = null;
+                }
+                cancelAnimationFrame(STATE.rafId);
+                elVideo.style.display = 'none';
+                elImg.style.display = 'block';
+                elImg.onload = () => {
+                    drawOverlay(elImg, elImg.naturalWidth, elImg.naturalHeight, false);
+                    showToast("Image processed");
+                };
+                elImg.src = ev.target.result;
+            };
+            reader.onerror = () => showToast("Couldn't read file", "error");
+            reader.readAsDataURL(file);
+        }
+
+        // ---------- Events ----------
+        document.getElementById('btn-start-experience').addEventListener('click', () => {
+            const modal = document.getElementById('start-modal');
+            modal.classList.add('hidden');
+            startCamera();
+        });
+        document.getElementById('btn-camera').addEventListener('click', startCamera);
+
+        document.getElementById('inp-file').addEventListener('change', (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (file) loadImageFile(file);
+            e.target.value = ''; // allow re-selecting same file
+        });
+
+        elToggle.addEventListener('change', (e) => {
+            STATE.overlayEnabled = e.target.checked;
+            if (STATE.mode === 'image') {
+                drawOverlay(elImg, elImg.naturalWidth, elImg.naturalHeight, false);
+            } else if (STATE.mode === 'camera' && !STATE.overlayEnabled) {
+                syncCanvasSize();
+                ctx.clearRect(0, 0, STATE.cssW, STATE.cssH);
+            }
+        });
+
+        // Density picker
+        document.querySelectorAll('.density-buttons button').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.density-buttons button').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                STATE.density = btn.dataset.density;
+                STATE.smoothedInit = false;
+                syncCanvasSize();
+                if (STATE.mode === 'image') {
+                    drawOverlay(elImg, elImg.naturalWidth, elImg.naturalHeight, false);
+                }
+            });
+        });
+
+        // Share
+        document.getElementById('btn-share').addEventListener('click', async () => {
+            const shareData = {
+                title: 'ColorSee',
+                text: 'Check out ColorSee — Realtime Color Detection!',
+                url: window.location.href,
+            };
+            if (navigator.share) {
+                try { await navigator.share(shareData); } catch (_) { /* user cancel */ }
+            } else if (navigator.clipboard && navigator.clipboard.writeText) {
+                try {
+                    await navigator.clipboard.writeText(window.location.href);
+                    showToast("Link copied");
+                } catch (_) {
+                    showToast("Share unavailable", "error");
+                }
+            } else {
+                showToast("Share unavailable", "error");
+            }
+        });
+
+        // Resize / orientation
+        let resizeRaf = 0;
+        window.addEventListener('resize', () => {
+            cancelAnimationFrame(resizeRaf);
+            resizeRaf = requestAnimationFrame(() => {
+                syncCanvasSize();
+                if (STATE.mode === 'image') {
+                    drawOverlay(elImg, elImg.naturalWidth, elImg.naturalHeight, false);
+                }
+            });
+        });
+
+        // Pause camera when tab hidden, resume when visible
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                cancelAnimationFrame(STATE.rafId);
+            } else if (STATE.mode === 'camera' && STATE.stream) {
+                STATE.rafId = requestAnimationFrame(loop);
+            }
+        });
+
+        // Initial size
+        syncCanvasSize();
+    })();
+    </script>
+</body>
+</html>
